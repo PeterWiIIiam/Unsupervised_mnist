@@ -2,6 +2,8 @@ import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 import numpy as np
 import os
+import matplotlib.pyplot as plt
+from visual_util import *
 
 
 def conv2d(X, W, strides=None, padding='SAME'):
@@ -84,6 +86,15 @@ def build_cnn_model(p_keep_conv=1., p_keep_hidden=1.):
         L5 = tf.matmul(L4, W5, name='model')
         output = tf.nn.softmax(L5, name='output')
 
+    # build back cnn
+    with tf.name_scope('layer3') as scope:
+
+        unpool3 = unpool()
+        relu_max = select_highest_activations(L3)
+        deconv3 = non_linear_deconv(relu_max, W3, L2.shape)
+
+        print(L3.name)
+
     return X, output
 
 def load_model(sess):
@@ -107,63 +118,6 @@ def check_accuracy(X, Y, input, labels, sess):
     return accuracy_rates
 
 
-def non_linear_deconv(Relu, W1):
-
-    print(Relu.shape)
-    Relu = tf.reshape(Relu, [-1, 28, 28, 32])
-    print(Relu.shape)
-    print(W1.shape)
-
-    zero_relu = np.zeros_like(Relu)
-
-    zero_relu[0,0,0] = Relu[0,0,0]
-
-    relu_back = tf.nn.relu(zero_relu)
-
-    deconv = tf.nn.conv2d_transpose(relu_back, W1, [1, 28, 28, 1], strides=[1, 1, 1, 1])
-
-    return deconv
-
-def unravel_argmax(argmax, shape, output_list=[]):
-
-
-    if len(shape) == 2:
-        print("return")
-        output_list.append(argmax // shape[-1])
-        output_list.append(argmax % shape[-1])
-        result = tf.stack(output_list)
-        print(result.shape)
-        return result
-
-    print(shape)
-    print(tf.stack(output_list).shape)
-
-    output_list.append(argmax // shape[-1])
-    return unravel_argmax(argmax % shape[-1], shape[:-1], output_list)
-
-def unpool(prev_layer, pooling_layer, switches):
-
-    unpooled = tf.Variable(initial_value=tf.zeros_like(prev_layer))
-
-    print(switches[0, 0, 0, 0])
-
-    switches = unravel_argmax(switches, prev_layer.get_shape().as_list())
-
-    print(switches)
-    print(switches.shape)
-    print(switches[:,0,0,0,0])
-
-    pooling_layer_shape = pooling_layer.shape
-    for instance in range(pooling_layer_shape[0]):
-        for height in range(pooling_layer_shape[1]):
-            for width in range(pooling_layer_shape[2]):
-                for channel in range(pooling_layer_shape[3]):
-                    # print(instance * height * width * channel)
-                    index = switches[:, instance, height, width, channel]
-                    max_value = pooling_layer[instance, height, width, channel]
-                    tf.scatter_update(unpooled, tf.reverse(index, [-1]), updates=tf.convert_to_tensor(max_value))
-
-    return unpooled
 
 def main(argv):
 
@@ -173,43 +127,46 @@ def main(argv):
         print(X.shape, Y.shape)
         load_model(sess)
 
-        input, labels = load_data()
-        # print(input.shape, labels.shape)
-        # accuracy_rates = check_accuracy(X, Y, input, labels, sess)
-        # print(accuracy_rates)
-
-        ## print variable and operation names
-        all_variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-        for variable in all_variables:
-            print(variable.name)
-
-        print("------------------------------------------------------------")
-        all_ops = tf.get_default_graph().get_operations()
-        for op in all_ops:
-            print(op.name)
-
-
-        graph = tf.get_default_graph()
-        # Relu1_op = graph.get_operation_by_name('layer1/Relu')
-        # Relu1 = sess.run(Relu1_op.values(), feed_dict={X: input})
-        # W1 = graph.get_tensor_by_name("W1:0")
-        # deconv = non_linear_deconv(np.array(Relu1), W1)
+        # input, labels = load_data()
+        # # print(input.shape, labels.shape)
+        # # accuracy_rates = check_accuracy(X, Y, input, labels, sess)
+        # # print(accuracy_rates)
         #
-        # result = sess.run(deconv)
-        # print(result)
+        # ## print variable and operation names
+        # all_variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+        # for variable in all_variables:
+        #     print(variable.name)
+        #
+        # print("------------------------------------------------------------")
+        # all_ops = tf.get_default_graph().get_operations()
+        # for op in all_ops:
+        #     print(op.name)
+        #
+        #
+        # graph = tf.get_default_graph()
+        # Relu1_op = graph.get_operation_by_name('layer1/Relu')
+        # # Relu1 = sess.run(Relu1_op.values(), feed_dict={X: input})
+        #
+        # W1 = graph.get_tensor_by_name("W1:0")
+        # deconv = non_linear_deconv(Relu1_op, W1)
+        #
+        # result, Relu1 = sess.run([deconv, Relu1_op.values()], feed_dict={X:input[0:1,:,:,:]})
+        # Relu1 = np.reshape(Relu1, [-1, 28, 28, 32])
+        #
+        # visualize(result)
 
 
-        pooling_layer_op = graph.get_operation_by_name('layer1/maxpool')
-        pooling_layer, switches = sess.run(pooling_layer_op.values(), feed_dict={X: input[0:2, :, :, :]})
-        print("orig swith shape", switches.shape)
-        print("pooling layer shape", pooling_layer.shape)
-        print(pooling_layer)
-        unpooled = unpool(tf.convert_to_tensor(input[0:2, :, :, :]), pooling_layer, switches)
-
-        print(unpooled.shape)
-
-        W1 = graph.get_tensor_by_name("W1:0")
-        deconv = non_linear_deconv(unpooled, W1)
+        # pooling_layer_op = graph.get_operation_by_name('layer1/maxpool')
+        # pooling_layer, switches = sess.run(pooling_layer_op.values(), feed_dict={X: input[0:2, :, :, :]})
+        # print("orig swith shape", switches.shape)
+        # print("pooling layer shape", pooling_layer.shape)
+        # print(pooling_layer)
+        # unpooled = unpool(tf.convert_to_tensor(input[0:2, :, :, :]), pooling_layer, switches)
+        #
+        # print(unpooled.shape)
+        #
+        # W1 = graph.get_tensor_by_name("W1:0")
+        # deconv = non_linear_deconv(unpooled, W1)
 
 
 if __name__ == '__main__':
