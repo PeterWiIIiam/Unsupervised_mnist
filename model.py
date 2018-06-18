@@ -1,6 +1,5 @@
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
-from tf_cnnvis import *
 import numpy as np
 import os
 
@@ -19,7 +18,9 @@ def max_pool(X, ksize=None, strides=None, padding='SAME'):
     if strides is None:
         strides = [1, 2, 2, 1]
 
-    return tf.nn.max_pool(X, ksize=ksize, strides=strides, padding=padding)
+    output, switches = tf.nn.max_pool_with_argmax(X, ksize=ksize, strides=strides,
+                                                  padding=padding, name='maxpool')
+    return output, switches
 
 def xavier_init(shape, name='', uniform=True):
     num_input = sum(shape[:-1])
@@ -38,15 +39,15 @@ def build_cnn_layer(X, W, p_dropout=1., pool=True, reshape=None):
     L = tf.nn.relu(conv2d(X, W), name="Relu")
 
     if pool is True:
-        L = max_pool(L)
+        L, switches = max_pool(L)
 
     if reshape is not None:
         L = tf.reshape(L, reshape)
 
     if p_dropout == 1:
-        return L
+        return L, switches
     else:
-        return tf.nn.dropout(L, p_dropout)
+        return tf.nn.dropout(L, p_dropout), switches
 
 # define model
 def build_cnn_model(p_keep_conv=1., p_keep_hidden=1.):
@@ -62,17 +63,17 @@ def build_cnn_model(p_keep_conv=1., p_keep_hidden=1.):
     with tf.name_scope('layer1') as scope:
         # L1 Conv shape=(?, 28, 28, 32)
         #    Pool     ->(?, 14, 14, 32)
-        L1 = build_cnn_layer(X, W1, p_keep_conv)
+        L1, switch1 = build_cnn_layer(X, W1, p_keep_conv)
     with tf.name_scope('layer2') as scope:
         # L2 Conv shape=(?, 14, 14, 64)
         #    Pool     ->(?, 7, 7, 64)
-        L2 = build_cnn_layer(L1, W2, p_keep_conv)
+        L2, switch2 = build_cnn_layer(L1, W2, p_keep_conv)
     with tf.name_scope('layer3') as scope:
         # L3 Conv shape=(?, 7, 7, 128)
         #    Pool     ->(?, 4, 4, 128)
         #    Reshape  ->(?, 625)
         reshape = [-1, W4.get_shape().as_list()[0]]
-        L3 = build_cnn_layer(L2, W3, p_keep_conv, reshape=reshape)
+        L3, switch3 = build_cnn_layer(L2, W3, p_keep_conv, reshape=reshape)
     with tf.name_scope('layer4') as scope:
         # L4 FC 4x4x128 inputs -> 625 outputs
         L4 = tf.nn.relu(tf.matmul(L3, W4))
@@ -88,11 +89,11 @@ def build_cnn_model(p_keep_conv=1., p_keep_hidden=1.):
 def load_model(sess):
 
     saver = tf.train.Saver()
-    saver.restore(sess, "/Users/xhe/Desktop/TensorFlow-MNIST/models/mnist-cnn")
+    saver.restore(sess, "./models/mnist-cnn")
 
 def load_data():
 
-    mnist = input_data.read_data_sets("/Users/xhe/Desktop/TensorFlow-MNIST/mnist/data/")
+    mnist = input_data.read_data_sets("./MNIST-data/")
     X = mnist.test.images.reshape(-1, 28, 28, 1)
     Y = mnist.test.labels
 
@@ -109,7 +110,7 @@ def check_accuracy(X, Y, input, labels, sess):
 def non_linear_deconv(Relu, W1):
 
     print(Relu.shape)
-    Relu = np.reshape(Relu[0,0,:,:,:], [-1, 28, 28, 32])
+    Relu = tf.reshape(Relu, [-1, 28, 28, 32])
     print(Relu.shape)
     print(W1.shape)
 
@@ -122,6 +123,47 @@ def non_linear_deconv(Relu, W1):
     deconv = tf.nn.conv2d_transpose(relu_back, W1, [1, 28, 28, 1], strides=[1, 1, 1, 1])
 
     return deconv
+
+def unravel_argmax(argmax, shape, output_list=[]):
+
+
+    if len(shape) == 2:
+        print("return")
+        output_list.append(argmax // shape[-1])
+        output_list.append(argmax % shape[-1])
+        result = tf.stack(output_list)
+        print(result.shape)
+        return result
+
+    print(shape)
+    print(tf.stack(output_list).shape)
+
+    output_list.append(argmax // shape[-1])
+    return unravel_argmax(argmax % shape[-1], shape[:-1], output_list)
+
+def unpool(prev_layer, pooling_layer, switches):
+
+    unpooled = tf.Variable(initial_value=tf.zeros_like(prev_layer))
+
+    print(switches[0, 0, 0, 0])
+
+    switches = unravel_argmax(switches, prev_layer.get_shape().as_list())
+
+    print(switches)
+    print(switches.shape)
+    print(switches[:,0,0,0,0])
+
+    pooling_layer_shape = pooling_layer.shape
+    for instance in range(pooling_layer_shape[0]):
+        for height in range(pooling_layer_shape[1]):
+            for width in range(pooling_layer_shape[2]):
+                for channel in range(pooling_layer_shape[3]):
+                    # print(instance * height * width * channel)
+                    index = switches[:, instance, height, width, channel]
+                    max_value = pooling_layer[instance, height, width, channel]
+                    tf.scatter_update(unpooled, tf.reverse(index, [-1]), updates=tf.convert_to_tensor(max_value))
+
+    return unpooled
 
 def main(argv):
 
@@ -148,13 +190,26 @@ def main(argv):
 
 
         graph = tf.get_default_graph()
-        Relu1_op = graph.get_operation_by_name('layer1/Relu')
-        Relu1 = sess.run(Relu1_op.values(), feed_dict={X: input})
-        W1 = graph.get_tensor_by_name("W1:0")
-        deconv = non_linear_deconv(np.array(Relu1), W1)
+        # Relu1_op = graph.get_operation_by_name('layer1/Relu')
+        # Relu1 = sess.run(Relu1_op.values(), feed_dict={X: input})
+        # W1 = graph.get_tensor_by_name("W1:0")
+        # deconv = non_linear_deconv(np.array(Relu1), W1)
+        #
+        # result = sess.run(deconv)
+        # print(result)
 
-        result = sess.run(deconv)
-        print(result)
+
+        pooling_layer_op = graph.get_operation_by_name('layer1/maxpool')
+        pooling_layer, switches = sess.run(pooling_layer_op.values(), feed_dict={X: input[0:2, :, :, :]})
+        print("orig swith shape", switches.shape)
+        print("pooling layer shape", pooling_layer.shape)
+        print(pooling_layer)
+        unpooled = unpool(tf.convert_to_tensor(input[0:2, :, :, :]), pooling_layer, switches)
+
+        print(unpooled.shape)
+
+        W1 = graph.get_tensor_by_name("W1:0")
+        deconv = non_linear_deconv(unpooled, W1)
 
 
 if __name__ == '__main__':
